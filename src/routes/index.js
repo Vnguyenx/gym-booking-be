@@ -6,6 +6,11 @@
 const express = require('express');
 const router = express.Router();
 
+// ── Khởi động scheduled jobs ──────────────────────────────
+// Đặt ở đây để job được đăng ký ngay khi server load routes
+const { startDailyAttendanceJob } = require('../jobs/dailyAttendance');
+startDailyAttendanceJob();
+
 // ── Import các route theo từng tính năng ─────────────────
 const authRoutes = require('./authRoutes');
 const bookingRoutes = require('./bookingRoutes'); // mở khoá khi làm tính năng đặt lịch

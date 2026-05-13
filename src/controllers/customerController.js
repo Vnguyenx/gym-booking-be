@@ -32,22 +32,59 @@ const getMyBookings = async (req, res) => {
         res.status(500).json({ error: err.message });
     }
 };
-// ─── GET /api/customer/classes ────────────────────────────────────────────────
-
 /**
  * Lấy danh sách lớp học + điểm danh của customer.
  * Mỗi classItem có mảng attendance lồng bên trong.
  */
+// GET /api/customer/classes
 const getMyClasses = async (req, res) => {
     try {
         const uid = req.user.uid;
 
-        const snap = await db
+        const classesSnap = await db
             .collection('classes')
             .where('customerId', '==', uid)
+            .orderBy('startDate', 'desc')
             .get();
 
-        const classes = snap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+        // Fetch attendance subcollection song song cho tất cả classes
+        const classes = await Promise.all(
+            classesSnap.docs.map(async (doc) => {
+                const data = doc.data();
+
+                // Lấy attendance subcollection
+                const attendanceSnap = await doc.ref
+                    .collection('attendance')
+                    .orderBy('date', 'desc')
+                    .get();
+
+                const attendance = attendanceSnap.docs.map((a) => {
+                    const att = a.data();
+                    const processDate = (d) => {
+                        if (!d) return null;
+                        if (d.toDate) return d.toDate().toISOString(); // Firebase Timestamp
+                        return d; // Đã là String
+                    };
+                    return {
+                        id:             a.id,
+                        date:           processDate(att.date),
+                        isSuccess:      att.isSuccess,
+                        type:           att.type,
+                        customerStatus: att.customerStatus,
+                        ptStatus:       att.ptStatus,
+                        secretCodeUsed: att.secretCodeUsed,
+                    };
+                });
+
+                return {
+                    id:            doc.id,
+                    ...data,
+                    startDate:     data.startDate?.toDate().toISOString() ?? null,
+                    endDate:       data.endDate?.toDate().toISOString()   ?? null,
+                    attendance,
+                };
+            })
+        );
 
         res.json({ classes });
     } catch (err) {
@@ -124,4 +161,70 @@ const getPTs = async (req, res) => {
     }
 };
 
-module.exports = { getMyBookings, getMyClasses, updateProfile, cancelBooking, getPTs };
+/**
+ * POST /api/customer/checkin
+ * Customer nhập mã bí mật để điểm danh
+ */
+const checkin = async (req, res) => {
+    try {
+        const uid = req.user.uid;
+        const { classId, secretCode } = req.body;
+
+        // 1. Kiểm tra Secret Code từ hệ thống
+        const configDoc = await db.collection('gym_settings').doc('daily_config').get();
+        if (!configDoc.exists || configDoc.data().currentSecretCode !== secretCode) {
+            return res.status(400).json({ error: 'Mã bí mật không đúng hoặc chưa được khởi tạo' });
+        }
+
+        // 2. Kiểm tra thông tin lớp học
+        const classRef = db.collection('classes').doc(classId);
+        const classDoc = await classRef.get();
+
+        if (!classDoc.exists || classDoc.data().customerId !== uid) {
+            return res.status(404).json({ error: 'Không tìm thấy thông tin gói tập' });
+        }
+
+        const classData = classDoc.data();
+        if (classData.status !== 'active') return res.status(400).json({ error: 'Gói tập đã hết hạn hoặc bị khóa' });
+        if (classData.usedSessions >= classData.totalSessions) return res.status(400).json({ error: 'Bạn đã dùng hết số buổi tập' });
+
+        // 3. Kiểm tra xem hôm nay đã điểm danh chưa (tránh trùng)
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+
+        const existingAtt = await classRef.collection('attendance')
+            .where('date', '>=', today.toISOString())
+            .where('isSuccess', '==', true)
+            .get();
+
+        if (!existingAtt.empty) return res.status(400).json({ error: 'Bạn đã điểm danh thành công hôm nay rồi' });
+
+        // 4. Tạo record điểm danh dựa trên loại gói
+        const isPT = classData.type === 'pt_coaching';
+        const attendanceRecord = {
+            date: new Date().toISOString(),
+            isSuccess: true,
+            type: isPT ? "pt_session" : "membership_checkin",
+            customerStatus: "confirmed",
+            ptStatus: isPT ? "none" : null, // PT sẽ confirm sau nếu là gói PT
+            secretCodeUsed: secretCode
+        };
+
+        const newAtt = await classRef.collection('attendance').add(attendanceRecord);
+
+        // 5. Cập nhật số buổi đã dùng
+        await classRef.update({
+            usedSessions: admin.firestore.FieldValue.increment(1)
+        });
+
+        res.json({
+            message: 'Điểm danh thành công',
+            record: { id: newAtt.id, ...attendanceRecord }
+        });
+
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+};
+
+module.exports = { getMyBookings, getMyClasses, updateProfile, cancelBooking, getPTs, checkin };
