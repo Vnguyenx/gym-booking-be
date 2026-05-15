@@ -15,14 +15,14 @@ startDailyAttendanceJob();
 const authRoutes = require('./authRoutes');
 const bookingRoutes = require('./bookingRoutes'); // mở khoá khi làm tính năng đặt lịch
 const customerRoutes = require('./customerRoutes');
-// const ptRoutes    = require('./ptRoutes');        // mở khoá khi làm tính năng PT
-// const adminRoutes = require('./adminRoutes');     // mở khoá khi làm tính năng admin
+const ptRoutes    = require('./ptRoutes');        // mở khoá khi làm tính năng PT
+const adminRoutes = require('./adminRoutes');     // mở khoá khi làm tính năng admin
 
 // ── Đăng ký routes ───────────────────────────────────────
 router.use('/auth', authRoutes);
 router.use('/bookings', bookingRoutes);
 router.use('/customer', customerRoutes);
-// router.use('/pts',      ptRoutes);
-// router.use('/admin',    adminRoutes);
+router.use('/pt',      ptRoutes);
+router.use('/admin',    adminRoutes);
 
 module.exports = router;
