@@ -36,10 +36,16 @@ const getMyBookings = async (req, res) => {
  * Lấy danh sách lớp học + điểm danh của customer.
  * Mỗi classItem có mảng attendance lồng bên trong.
  */
-// GET /api/customer/classes
 const getMyClasses = async (req, res) => {
     try {
         const uid = req.user.uid;
+
+        // Kéo ra ngoài — dùng chung cho cả class lẫn attendance
+        const processDate = (d) => {
+            if (!d) return null;
+            if (d.toDate) return d.toDate().toISOString();
+            return d;
+        };
 
         const classesSnap = await db
             .collection('classes')
@@ -47,12 +53,10 @@ const getMyClasses = async (req, res) => {
             .orderBy('startDate', 'desc')
             .get();
 
-        // Fetch attendance subcollection song song cho tất cả classes
         const classes = await Promise.all(
             classesSnap.docs.map(async (doc) => {
                 const data = doc.data();
 
-                // Lấy attendance subcollection
                 const attendanceSnap = await doc.ref
                     .collection('attendance')
                     .orderBy('date', 'desc')
@@ -60,11 +64,6 @@ const getMyClasses = async (req, res) => {
 
                 const attendance = attendanceSnap.docs.map((a) => {
                     const att = a.data();
-                    const processDate = (d) => {
-                        if (!d) return null;
-                        if (d.toDate) return d.toDate().toISOString(); // Firebase Timestamp
-                        return d; // Đã là String
-                    };
                     return {
                         id:             a.id,
                         date:           processDate(att.date),
@@ -77,10 +76,10 @@ const getMyClasses = async (req, res) => {
                 });
 
                 return {
-                    id:            doc.id,
+                    id:        doc.id,
                     ...data,
-                    startDate:     data.startDate?.toDate().toISOString() ?? null,
-                    endDate:       data.endDate?.toDate().toISOString()   ?? null,
+                    startDate: processDate(data.startDate),
+                    endDate:   processDate(data.endDate),
                     attendance,
                 };
             })
@@ -91,7 +90,6 @@ const getMyClasses = async (req, res) => {
         res.status(500).json({ error: err.message });
     }
 };
-
 // ─── PUT /api/customer/profile ────────────────────────────────────────────────
 
 /**
