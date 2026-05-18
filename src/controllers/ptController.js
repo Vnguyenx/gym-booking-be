@@ -40,9 +40,16 @@ const fetchCustomerInfo = async (customerIds) => {
 
         snap.docs.forEach((doc) => {
             const data = doc.data();
+            // console.log('[fetchCustomerInfo] userId:', doc.id, '| fields:', Object.keys(data));
+            // console.log('[fetchCustomerInfo] avatar fields:', {
+            //     avatar:    data.avatar,
+            //     avatarUrl: data.avatarUrl,
+            //     photoURL:  data.photoURL,
+            // });
+
             infoMap.set(doc.id, {
                 name:   data.displayName || data.fullName || data.email || doc.id,
-                avatar: data.avatar || data.photoURL || null,
+                avatar: data.avatarUrl || data.avatar || data.photoURL || null,
             });
         });
     }
@@ -54,7 +61,7 @@ const fetchCustomerInfo = async (customerIds) => {
 const getActiveStudents = async (req, res) => {
     try {
         const ptId = req.user.uid;
-        console.log('[getActiveStudents] step1 - ptId:', ptId);
+       // console.log('[getActiveStudents] step1 - ptId:', ptId);
 
         const classesSnap = await db
             .collection('classes')
@@ -62,7 +69,7 @@ const getActiveStudents = async (req, res) => {
             .where('status', '==', 'active')
             .orderBy('startDate', 'desc')
             .get();
-        console.log('[getActiveStudents] step2 - classes found:', classesSnap.size);
+        //console.log('[getActiveStudents] step2 - classes found:', classesSnap.size);
 
         const rawClasses = await Promise.all(
             classesSnap.docs.map(async (doc) => {
@@ -71,13 +78,13 @@ const getActiveStudents = async (req, res) => {
                 return { id: doc.id, ...classData, attendance };
             })
         );
-        console.log('[getActiveStudents] step3 - rawClasses built:', rawClasses.length);
+        //console.log('[getActiveStudents] step3 - rawClasses built:', rawClasses.length);
 
         const customerIds = rawClasses.map((c) => c.customerId);
-        console.log('[getActiveStudents] step4 - customerIds:', customerIds);
+        //console.log('[getActiveStudents] step4 - customerIds:', customerIds);
 
         const infoMap = await fetchCustomerInfo(customerIds);
-        console.log('[getActiveStudents] step5 - infoMap size:', infoMap.size);
+        //console.log('[getActiveStudents] step5 - infoMap size:', infoMap.size);
 
         const classes = rawClasses.map((c) => {
             const info = infoMap.get(c.customerId);
@@ -88,10 +95,10 @@ const getActiveStudents = async (req, res) => {
             };
         });
 
-        console.log('[getActiveStudents] step6 - done, returning', classes.length, 'classes');
+        //console.log('[getActiveStudents] step6 - done, returning', classes.length, 'classes');
         res.json({ classes });
     } catch (err) {
-        console.error('[getActiveStudents] FAILED:', err.message);
+        //console.error('[getActiveStudents] FAILED:', err.message);
         console.error(err.stack);
         res.status(500).json({ error: err.message });
     }
@@ -101,7 +108,7 @@ const getActiveStudents = async (req, res) => {
 const getExpiredStudents = async (req, res) => {
     try {
         const ptId = req.user.uid;
-        console.log('[getExpiredStudents] step1 - ptId:', ptId);
+        //console.log('[getExpiredStudents] step1 - ptId:', ptId);
 
         const classesSnap = await db
             .collection('classes')
@@ -109,7 +116,7 @@ const getExpiredStudents = async (req, res) => {
             .where('status', '==', 'expired')
             .orderBy('startDate', 'desc')
             .get();
-        console.log('[getExpiredStudents] step2 - classes found:', classesSnap.size);
+        //console.log('[getExpiredStudents] step2 - classes found:', classesSnap.size);
 
         const rawClasses = await Promise.all(
             classesSnap.docs.map(async (doc) => {
@@ -118,13 +125,13 @@ const getExpiredStudents = async (req, res) => {
                 return { id: doc.id, ...classData, attendance };
             })
         );
-        console.log('[getExpiredStudents] step3 - rawClasses built:', rawClasses.length);
+        //console.log('[getExpiredStudents] step3 - rawClasses built:', rawClasses.length);
 
         const customerIds = rawClasses.map((c) => c.customerId);
-        console.log('[getExpiredStudents] step4 - customerIds:', customerIds);
+        //console.log('[getExpiredStudents] step4 - customerIds:', customerIds);
 
         const infoMap = await fetchCustomerInfo(customerIds);
-        console.log('[getExpiredStudents] step5 - infoMap size:', infoMap.size);
+        //console.log('[getExpiredStudents] step5 - infoMap size:', infoMap.size);
 
         const classes = rawClasses.map((c) => {
             const info = infoMap.get(c.customerId);
@@ -137,7 +144,7 @@ const getExpiredStudents = async (req, res) => {
 
         res.json({ classes });
     } catch (err) {
-        console.error('[getExpiredStudents] FAILED:', err.message);
+        //console.error('[getExpiredStudents] FAILED:', err.message);
         console.error(err.stack);
         res.status(500).json({ error: err.message });
     }
