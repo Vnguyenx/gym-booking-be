@@ -9,6 +9,7 @@ const {
     getExpiredStudents,
     confirmAttendance,
     updateProfile,
+    getMyProfile,
 } = require('../controllers/ptController');
 
 // Tất cả routes /api/pt/* đều yêu cầu đăng nhập + role PT
@@ -24,5 +25,6 @@ router.post('/confirm/:attendanceId', confirmAttendance);
 
 // ── PT profile ────────────────────────────────────────────
 router.put('/profile', updateProfile);
+router.get('/me', getMyProfile);
 
 module.exports = router;
