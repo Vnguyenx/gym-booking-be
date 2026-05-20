@@ -8,6 +8,7 @@ const {
     createBooking,
     getAvailablePTs,
     getPTServices,
+    vnpayIPN,
 } = require('../controllers/bookingController');
 const verifySession = require('../middlewares/verifySession');
 
@@ -19,5 +20,13 @@ router.get('/pt-services', verifySession, getPTServices);
 
 // Tạo booking mới
 router.post('/', verifySession, createBooking);
+
+
+/**
+ * 2. Route nhận thông báo kết quả từ VNPay (IPN)
+ * QUAN TRỌNG: Không dùng verifySession ở đây
+ * VNPay gọi bằng phương thức GET
+ */
+router.get('/vnpay-ipn', vnpayIPN);
 
 module.exports = router;

@@ -19,11 +19,17 @@ const getMyBookings = async (req, res) => {
 
         const bookings = snap.docs.map((doc) => {
             const data = doc.data();
+            const parseDate = (d) => {
+                if (!d) return null;
+                if (d.toDate) return d.toDate().toISOString(); // Firestore Timestamp
+                return d; // đã là string rồi, trả về luôn
+            };
+
             return {
                 id: doc.id,
                 ...data,
-                createdAt: data.createdAt?.toDate().toISOString() ?? null,
-                paidAt:    data.paidAt?.toDate().toISOString()    ?? null,
+                createdAt: parseDate(data.createdAt),
+                paidAt:    parseDate(data.paidAt),
             };
         });
 

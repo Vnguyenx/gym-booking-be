@@ -4,11 +4,32 @@
 
 const bookingService = require('../services/bookingService');
 
+/**
+ * IPN handler: Nhận thông báo từ VNPay
+ * GET /api/bookings/vnpay-ipn
+ */
+const vnpayIPN = async (req, res) => {
+    try {
+        let vnp_Params = req.query;
+        // Chỉ gọi Service xử lý dữ liệu từ query
+        const result = await bookingService.processVnpayIPN(vnp_Params);
+
+        // Trả về mã lỗi theo yêu cầu của VNPay
+        res.status(200).json({ RspCode: result.code, Message: result.message });
+    } catch (err) {
+// Xem thử nó bị vướng ở đoạn if nào khiến nó nhảy vào mã 99
+        console.error('IPN Controller Error:', err);
+        res.status(200).json({ RspCode: '99', Message: 'Unknown Error' });
+    }
+};
+
 // POST /api/bookings — Tạo booking mới
 const createBooking = async (req, res) => {
     try {
-        // customerId lấy từ session cookie — không tin FE
-        const result = await bookingService.createBooking(req.user.uid, req.body);
+        // Truyền thêm 'req' vào hàm service
+        const result = await bookingService.createBooking(req, req.user.uid, req.body);
+
+        // Trả kết quả (trong đó có paymentUrl) về cho Frontend
         res.status(201).json(result);
     } catch (err) {
         console.error('Lỗi tạo booking:', err);
@@ -38,4 +59,4 @@ const getPTServices = async (req, res) => {
     }
 };
 
-module.exports = { createBooking, getAvailablePTs, getPTServices };
+module.exports = { createBooking, getAvailablePTs, getPTServices, vnpayIPN };
