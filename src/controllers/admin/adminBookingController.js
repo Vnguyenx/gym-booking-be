@@ -15,17 +15,59 @@ const convertTimestamps = (obj) => {
 
 /**
  * GET /api/admin/bookings?status=pending|confirmed|cancelled
+ * Cập nhật để join tên khách, tên gói và tên PT cho cả danh sách
  */
 const getBookings = async (req, res) => {
     try {
         const { status } = req.query;
         let query = db.collection('bookings').orderBy('createdAt', 'desc');
-        if (status) query = db.collection('bookings')
-            .where('status', '==', status)
-            .orderBy('createdAt', 'desc');
 
-        const snap     = await query.get();
-        const bookings = snap.docs.map(d => ({ id: d.id, ...convertTimestamps(d.data()) }));
+        if (status && status !== 'all') {
+            query = db.collection('bookings')
+                .where('status', '==', status)
+                .orderBy('createdAt', 'desc');
+        }
+
+        const snap = await query.get();
+
+        // Dùng Promise.all để fetch thông tin bổ trợ cho tất cả booking cùng lúc
+        const bookings = await Promise.all(snap.docs.map(async (doc) => {
+            const data = doc.data();
+
+            // 1. Lấy tên khách hàng
+            const userDoc = await db.collection('users').doc(data.customerId).get();
+            const customerName = userDoc.exists ? (userDoc.data().displayName || userDoc.data().fullName) : 'Nguời dùng';
+            const customerPhone = userDoc.exists ? userDoc.data().phoneNumber : '';
+
+            // 2. Lấy tên gói tập
+            const memDoc = await db.collection('memberships').doc(data.membershipId).get();
+            const membershipName = memDoc.exists ? memDoc.data().name : data.membershipId;
+
+            // 3. Lấy tên PT (nếu có)
+            let ptName = '';
+            if (data.ptId) {
+                const ptDoc = await db.collection('pts').doc(data.ptId).get();
+                ptName = ptDoc.exists ? ptDoc.data().fullName : '';
+            }
+
+            // 4. Lấy tên dịch vụ PT
+            const ptServiceNames = {
+                'pt-none': 'Không thuê PT',
+                'pt-1on1': 'Thuê PT 1:1',
+                'pt-group': 'Thuê PT nhóm'
+            };
+
+            return {
+                id: doc.id,
+                ...convertTimestamps(data),
+                customerName,
+                customerPhone,
+                membershipName,
+                ptName,
+                ptServiceName: ptServiceNames[data.ptServiceId] || data.ptServiceId
+            };
+        }));
+
         res.json({ bookings });
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -37,9 +79,45 @@ const getBookings = async (req, res) => {
  */
 const getBookingById = async (req, res) => {
     try {
-        const doc = await db.collection('bookings').doc(req.params.bookingId).get();
-        if (!doc.exists) return res.status(404).json({ error: 'Không tìm thấy booking' });
-        res.json({ booking: { id: doc.id, ...convertTimestamps(doc.data()) } });
+        const { bookingId } = req.params;
+        const doc = await db.collection('bookings').doc(bookingId).get();
+        if (!doc.exists) return res.status(404).json({ error: 'Không tìm thấy đơn' });
+
+        const bookingData = doc.data();
+
+        // --- Bắt đầu phần Join dữ liệu ---
+        // 1. Lấy tên khách hàng
+        const userDoc = await db.collection('users').doc(bookingData.customerId).get();
+        const customerName = userDoc.exists ? userDoc.data().displayName : 'N/A';
+        const customerPhone = userDoc.exists ? userDoc.data().phone : 'N/A';
+
+        // 2. Lấy tên gói tập
+        const memDoc = await db.collection('memberships').doc(bookingData.membershipId).get();
+        const membershipName = memDoc.exists ? memDoc.data().name : 'Gói tập đã xoá';
+
+        // 3. Lấy tên dịch vụ PT (nếu có)
+        let ptServiceName = 'Không thuê PT';
+        if (bookingData.ptServiceId && bookingData.ptServiceId !== 'pt-none') {
+            const ptServDoc = await db.collection('pt_services').doc(bookingData.ptServiceId).get();
+            ptServiceName = ptServDoc.exists ? ptServDoc.data().name : bookingData.ptServiceId;
+        }
+        // 3. Lấy tên PT
+        let ptName = 'Chưa chọn / Không có';
+        if (bookingData.ptId && bookingData.ptId !== '') {
+            const ptDoc = await db.collection('pts').doc(bookingData.ptId).get();
+            ptName = ptDoc.exists ? ptDoc.data().fullName : 'PT không tồn tại';
+        }
+        const fullBooking = {
+            id: doc.id,
+            ...convertTimestamps(bookingData),
+            customerName,   // <--- Thêm các trường này
+            customerPhone,
+            membershipName,
+            ptServiceName,
+            ptName
+        };
+
+        res.json({ booking: fullBooking });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
