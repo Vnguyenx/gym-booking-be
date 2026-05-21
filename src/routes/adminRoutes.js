@@ -51,6 +51,7 @@ router.patch ('/classes/:classId',     classCtrl.updateClass);
 router.get   ('/bookings',             bookingCtrl.getBookings);
 router.get   ('/bookings/:bookingId',  bookingCtrl.getBookingById);
 router.patch ('/bookings/:bookingId',  bookingCtrl.updateBookingStatus);
+router.post('/bookings', bookingCtrl.createBooking);
 
 // ══════════════════════════════════════════════════════
 //  CONTENT (trang chủ)

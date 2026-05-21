@@ -171,7 +171,7 @@ const getPTApplications = async (req, res) => {
  * PATCH /api/admin/pt-applications/:id
  * Duyệt hoặc từ chối đơn: body { status: 'approved' | 'rejected' }
  *
- * Khi approved → tạo document trong collection `pts` luôn
+ * Khi approved → tạo Firebase Auth account, document trong `users` và `pts`
  */
 const reviewPTApplication = async (req, res) => {
     const { id } = req.params;
@@ -188,12 +188,35 @@ const reviewPTApplication = async (req, res) => {
 
         await appRef.update({ status });
 
-        // Nếu approved → tạo hồ sơ PT trong collection pts
+        // Nếu approved → tạo tài khoản Firebase Auth + document trong users + pts
         if (status === 'approved') {
             const data = appDoc.data();
-            // Document ID của pts nên trùng với uid trong users
-            // Hiện chưa có uid — dùng id đơn làm placeholder, cần link sau
-            await db.collection('pts').doc(id).set({
+
+            // 1. Đếm số PT hiện có để tạo password tăng dần (Gymxyz@0001, 0002, ...)
+            const ptCountSnap = await db.collection('users').where('role', '==', 'pt').get();
+            const ptOrder = String(ptCountSnap.size + 1).padStart(4, '0');
+            const tempPassword = `Gymxyz@${ptOrder}`;
+
+            // 2. Tạo Firebase Auth account
+            const authUser = await auth.createUser({
+                email:    data.email,
+                password: tempPassword,
+            });
+            const uid = authUser.uid;
+
+            // 3. Tạo document trong collection `users`
+            await db.collection('users').doc(uid).set({
+                uid,
+                displayName: data.fullName,
+                email:       data.email,
+                phone:       data.phone   ?? '',
+                avatarUrl:   data.avatarUrl ?? '',
+                role:        'pt',
+                createdAt:   admin.firestore.FieldValue.serverTimestamp(),
+            });
+
+            // 4. Tạo hồ sơ chuyên môn trong collection `pts` (dùng cùng uid)
+            await db.collection('pts').doc(uid).set({
                 fullName:    data.fullName,
                 gender:      data.gender,
                 bio:         data.bio,
@@ -201,8 +224,11 @@ const reviewPTApplication = async (req, res) => {
                 experience:  data.experience,
                 avatar:      data.avatarUrl ?? '',
                 isAvailable: true,
-                updateAt:    new Date(),
+                updateAt:    admin.firestore.FieldValue.serverTimestamp(),
             });
+
+            // 5. Ghi uid ngược lại vào đơn để tiện tra cứu sau này
+            await appRef.update({ uid });
         }
 
         res.json({ message: `Đơn đã được ${status === 'approved' ? 'duyệt' : 'từ chối'}` });
@@ -210,6 +236,7 @@ const reviewPTApplication = async (req, res) => {
         res.status(500).json({ error: err.message });
     }
 };
+
 
 module.exports = {
     getUsers, getUserById, updateUser, deleteUser,
