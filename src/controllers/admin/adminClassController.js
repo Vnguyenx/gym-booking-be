@@ -39,90 +39,103 @@ const getNameMap = async (collectionName, ids, nameField) => {
  * GET /api/admin/classes?status=active|expired&ptId=xxx&customerId=xxx
  * Lấy danh sách lớp học, hỗ trợ filter
  */
+// Thêm hàm helper này ở đầu file hoặc bên ngoài các controller để dùng chung
+const isValidPath = (path) => typeof path === 'string' && path.trim() !== '';
+
 const getClasses = async (req, res) => {
     try {
-        const { status, ptId, customerId } = req.query;
-        let query = db.collection('classes');
+        const { status } = req.query;
+        let query = db.collection('classes').orderBy('startDate', 'desc');
+        if (status && status !== 'all') {
+            query = query.where('status', '==', status);
+        }
 
-        // Filter xử lý "Tất cả" (nếu status không có hoặc là rỗng thì không where)
-        if (status && status !== 'all') query = query.where('status', '==', status);
-        if (ptId) query = query.where('ptId', '==', ptId);
-        if (customerId) query = query.where('customerId', '==', customerId);
+        const snap = await query.get();
 
-        const snap = await query.orderBy('startDate', 'desc').get();
-        const rawClasses = snap.docs.map(d => ({ id: d.id, ...convertTimestamps(d.data()) }));
+        const classes = await Promise.all(snap.docs.map(async (doc) => {
+            const data = doc.data();
 
-        // --- BƯỚC KẾT BẢNG (LOOKUP NAMES) ---
-        const customerIds = [...new Set(rawClasses.map(c => c.customerId))];
-        const ptIds = [...new Set(rawClasses.map(c => c.ptId).filter(id => id))];
-        const creatorIds = [...new Set(rawClasses.map(c => c.createdBy).filter(id => id))];
+            // 1. CHỐT CHẶN: customerId (Dòng này thường xuyên gây lỗi nhất nếu DB có rác)
+            let customerName = 'Khách lẻ';
+            if (isValidPath(data.customerId)) {
+                const userDoc = await db.collection('users').doc(data.customerId).get();
+                if (userDoc.exists) {
+                    customerName = userDoc.data().displayName || userDoc.data().fullName || 'N/A';
+                }
+            }
 
-        const [customerNames, ptNames,creatorNames] = await Promise.all([
-            getNameMap('users', customerIds, 'displayName'),
-            getNameMap('pts', ptIds, 'fullName'),
-            getNameMap('users', creatorIds, 'displayName')
-        ]);
-        const typeMapping = {
-            'pt-1on1': 'PT Kèm 1:1',
-            'pt-group': 'Lớp Nhóm PT',
-            'membership': 'Gói Hội Viên'
-        };
+            // 2. CHỐT CHẶN: ptId
+            let ptName = 'Không có';
+            if (isValidPath(data.ptId)) {
+                const ptDoc = await db.collection('pts').doc(data.ptId).get();
+                if (ptDoc.exists) ptName = ptDoc.data().fullName;
+            }
 
-        const classes = rawClasses.map(c => ({
-            ...c,
-            customerName: customerNames[c.customerId] || 'Nguời dùng cũ',
-            ptName: ptNames[c.ptId] || 'Chưa phân công',
-            creatorName: creatorNames[c.createdBy] || 'Hệ thống',
-            typeName: typeMapping[c.type] || c.type
+            // 3. CHỐT CHẶN: ptServiceId (Lấy theo TYPE thay vì ID cứng)
+            let ptServiceName = 'Dịch vụ mặc định';
+            if (isValidPath(data.type)) {
+                const ptServDoc = await db.collection('pt_services').doc(data.type).get();
+                if (ptServDoc.exists) {
+                    ptServiceName = ptServDoc.data().name;
+                }
+            }
+
+            return {
+                id: doc.id,
+                ...convertTimestamps(data),
+                customerName,
+                ptName,
+                ptServiceName
+            };
         }));
 
         res.json({ classes });
     } catch (err) {
+        console.error("Lỗi GetClasses:", err.message);
         res.status(500).json({ error: err.message });
     }
 };
 
-/**
- * GET /api/admin/classes/:classId
- * Chi tiết 1 lớp kèm attendance
- */
 const getClassById = async (req, res) => {
     try {
-        const { classId } = req.params;
-        const doc = await db.collection('classes').doc(classId).get();
+        const doc = await db.collection('classes').doc(req.params.classId).get();
+        if (!doc.exists) return res.status(404).json({ error: 'Không tìm thấy lớp' });
 
-        if (!doc.exists) {
-            return res.status(404).json({ error: 'Không tìm thấy lớp' });
+        const data = doc.data();
+
+        let customerName = 'Khách lẻ';
+        if (isValidPath(data.customerId)) {
+            const userDoc = await db.collection('users').doc(data.customerId).get();
+            customerName = userDoc.exists ? (userDoc.data().displayName || userDoc.data().fullName) : 'N/A';
         }
-        const classData = { id: doc.id, ...convertTimestamps(doc.data()) };
 
-        // 1. Lấy dữ liệu tên từ các collection khác song song
-        const [userDoc, ptDoc, creatorDoc] = await Promise.all([
-            db.collection('users').doc(classData.customerId).get(),
-            classData.ptId ? db.collection('pts').doc(classData.ptId).get() : Promise.resolve(null),
-            classData.createdBy ? db.collection('users').doc(classData.createdBy).get() : Promise.resolve(null)
-        ]);
+        let ptName = 'Không có';
+        if (isValidPath(data.ptId)) {
+            const ptDoc = await db.collection('pts').doc(data.ptId).get();
+            ptName = ptDoc.exists ? ptDoc.data().fullName : 'N/A';
+        }
 
-        // 2. Map tên loại dịch vụ (Mapping này nên để ở một file constants dùng chung)
-        const typeMapping = {
-            'pt-1on1': 'PT Kèm 1:1',
-            'pt-group': 'Lớp Nhóm PT',
-            'membership': 'Gói Hội Viên'
-        };
+        let ptServiceName = 'Dịch vụ mặc định';
+        if (isValidPath(data.ptServiceId)) {
+            const ptServDoc = await db.collection('pt_services').doc(data.ptServiceId).get();
+            if (ptServDoc.exists) ptServiceName = ptServDoc.data().name;
+        } else if (isValidPath(data.type)) {
+            const ptServDoc = await db.collection('pt_services').doc(data.type).get();
+            if (ptServDoc.exists) ptServiceName = ptServDoc.data().name;
+        }
 
-        // 3. Lấy danh sách điểm danh
-        const attendance = await getAttendance(classId);
+        const attendance = await getAttendance(doc.id);
 
-        const enrichedClass = {
-            ...classData,
-            customerName: userDoc.exists ? userDoc.data().displayName : 'Khách hàng cũ',
-            ptName: ptDoc?.exists ? ptDoc.data().fullName : 'Chưa phân công',
-            creatorName: creatorDoc?.exists ? creatorDoc.data().displayName : 'Hệ thống',
-            typeName: typeMapping[classData.type] || classData.type,
-            attendance
-        };
-
-        res.json({ class: enrichedClass });
+        res.json({
+            class: {
+                id: doc.id,
+                ...convertTimestamps(data),
+                customerName,
+                ptName,
+                ptServiceName,
+                attendance
+            }
+        });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }

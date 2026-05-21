@@ -60,6 +60,36 @@ const updatePTService = async (req, res) => {
         res.json({ message: 'Cập nhật dịch vụ PT thành công' });
     } catch (err) { res.status(500).json({ error: err.message }); }
 };
+const createPTService = async (req, res) => {
+    const { name, pricePerMonth, type } = req.body;
+
+    // Kiểm tra các trường bắt buộc theo cấu trúc DB
+    if (!name || !pricePerMonth || !type) {
+        return res.status(400).json({ error: 'Thiếu trường bắt buộc: name, pricePerMonth hoặc type' });
+    }
+
+    try {
+        const ref = await db.collection('pt_services').add({
+            name,
+            pricePerMonth,
+            type,
+            createdAt: new Date(), // Thêm dấu mốc thời gian tạo
+        });
+        res.status(201).json({ message: 'Tạo dịch vụ PT thành công', ptServiceId: ref.id });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+};
+
+const deletePTService = async (req, res) => {
+    try {
+        // Xóa dựa trên document ID truyền vào từ URL
+        await db.collection('pt_services').doc(req.params.id).delete();
+        res.json({ message: 'Đã xoá dịch vụ PT' });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+};
 
 // ══════════════════════════════════════════════════════
 //  EQUIPMENT
@@ -112,6 +142,6 @@ const deleteEquipment = async (req, res) => {
 
 module.exports = {
     getMemberships, createMembership, updateMembership, deleteMembership,
-    getPTServices, updatePTService,
+    getPTServices, updatePTService, createPTService, deletePTService,
     getEquipments, createEquipment, updateEquipment, deleteEquipment,
 };

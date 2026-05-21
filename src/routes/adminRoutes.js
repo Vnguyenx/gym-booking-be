@@ -84,7 +84,9 @@ router.patch ('/memberships/:id',      catalogCtrl.updateMembership);
 router.delete('/memberships/:id',      catalogCtrl.deleteMembership);
 
 router.get   ('/pt-services',          catalogCtrl.getPTServices);
+router.post  ('/pt-services',          catalogCtrl.createPTService);   // Thêm mới route POST
 router.patch ('/pt-services/:id',      catalogCtrl.updatePTService);
+router.delete('/pt-services/:id',      catalogCtrl.deletePTService);   // Thêm mới route DELETE
 
 router.get   ('/equipment',            catalogCtrl.getEquipments);
 router.post  ('/equipment',            catalogCtrl.createEquipment);

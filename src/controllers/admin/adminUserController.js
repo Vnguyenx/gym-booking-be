@@ -83,8 +83,20 @@ const updateUser = async (req, res) => {
  */
 const deleteUser = async (req, res) => {
     try {
-        await db.collection('users').doc(req.params.uid).delete();
-        res.json({ message: 'Đã xoá user' });
+        const uid = req.params.uid;
+
+        const userDoc = await db.collection('users').doc(uid).get();
+        if (!userDoc.exists) return res.status(404).json({ error: 'Không tìm thấy user' });
+
+        const { role } = userDoc.data();
+
+        await db.collection('users').doc(uid).delete();
+
+        if (role === 'pt') {
+            await db.collection('pts').doc(uid).delete();
+        }
+
+        res.json({ message: role === 'pt' ? 'Đã xoá user và hồ sơ PT' : 'Đã xoá user' });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }

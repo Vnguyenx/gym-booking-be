@@ -178,7 +178,9 @@ const processVnpayIPN = async (vnp_Params) => {
     } else {
         await db.collection('bookings').doc(bookingId).update({
             status: 'cancelled',
-            cancelReason: 'VNPay payment failed'
+            cancelReason: 'VNPay payment failed',
+            vnpay_ResponseCode: responseCode,
+            vnpay_TransactionNo: vnp_Params['vnp_TransactionNo'] || ''
         });
         return { success: false, code: '01', message: 'Payment Failed' };
     }

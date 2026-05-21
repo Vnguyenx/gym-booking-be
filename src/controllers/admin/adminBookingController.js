@@ -45,11 +45,13 @@ const getBookings = async (req, res) => {
                 ptName = ptDoc.exists ? ptDoc.data().fullName : '';
             }
 
-            const ptServiceNames = {
-                'pt-none':  'Không thuê PT',
-                'pt-1on1':  'Thuê PT 1:1',
-                'pt-group': 'Thuê PT nhóm'
-            };
+            let ptServiceName = '';
+            if (data.ptServiceId) {
+                const ptServDoc = await db.collection('pt_services').doc(data.ptServiceId).get();
+                if (ptServDoc.exists) {
+                    ptServiceName = ptServDoc.data().name; // Lấy "Tên dịch vụ" từ DB chứ không map tay
+                }
+            }
 
             return {
                 id: doc.id,
@@ -58,7 +60,7 @@ const getBookings = async (req, res) => {
                 customerPhone,
                 membershipName,
                 ptName,
-                ptServiceName: ptServiceNames[data.ptServiceId] || data.ptServiceId
+                ptServiceName
             };
         }));
 
@@ -124,61 +126,44 @@ const getBookingById = async (req, res) => {
  */
 const updateBookingStatus = async (req, res) => {
     const { bookingId } = req.params;
-    const { status }    = req.body;
-
-    if (!['confirmed', 'cancelled'].includes(status)) {
-        return res.status(400).json({ error: 'status phải là confirmed hoặc cancelled' });
-    }
+    const { status } = req.body;
 
     try {
         const bookingRef = db.collection('bookings').doc(bookingId);
         const bookingDoc = await bookingRef.get();
-        if (!bookingDoc.exists) return res.status(404).json({ error: 'Không tìm thấy booking' });
+        if (!bookingDoc.exists) return res.status(404).json({ error: 'Không tìm thấy đơn' });
 
-        const update = { status };
-        if (status === 'confirmed') update.paidAt = new Date().toISOString();
+        const data = bookingDoc.data();
+        await bookingRef.update({ status, updatedAt: new Date() });
 
-        await bookingRef.update(update);
-
-        // Tạo class khi confirmed — với mọi loại ptServiceId
         if (status === 'confirmed') {
-            const data = bookingDoc.data();
+            // Lấy thông tin dịch vụ để check type
+            const ptServDoc = await db.collection('pt_services').doc(data.ptServiceId).get();
+            const ptServiceData = ptServDoc.exists ? ptServDoc.data() : { type: 'none' };
 
-            // Lấy thông tin membership để tính số buổi và thời hạn
             const memDoc = await db.collection('memberships').doc(data.membershipId).get();
             const durationMonths = memDoc.exists ? memDoc.data().durationMonths : 1;
 
-            const startDate  = new Date();
-            const endDate    = new Date();
+            const startDate = new Date();
+            const endDate = new Date();
             endDate.setMonth(endDate.getMonth() + durationMonths);
 
-            // Tổng số buổi = số ngày thực tế (gói 1m ~ 30, gói 3m ~ 90, ...)
-            const msPerDay      = 1000 * 60 * 60 * 24;
-            const totalSessions = Math.round((endDate - startDate) / msPerDay);
-
-            const isPtService = data.ptServiceId && data.ptServiceId !== 'pt-none';
-
+            // Logic tạo class dựa trên ptServiceData.type
             await db.collection('classes').add({
-                customerId:   data.customerId,
-                ptId:         isPtService ? (data.ptId || '') : '',
-                type:         isPtService
-                    ? (data.ptServiceId === 'pt-1on1' ? 'pt-1on1' : 'pt-group')
-                    : 'pt-none',
-                totalSessions,
+                customerId: data.customerId,
+                ptId: ptServiceData.type === 'none' ? '' : (data.ptId || ''),
+                type: ptServiceData.type, // Lấy trực tiếp type: 'pt-1on1', 'pt-group', 'none'
+                totalSessions: Math.round((endDate - startDate) / (1000 * 60 * 60 * 24)),
                 usedSessions: 0,
                 startDate,
                 endDate,
-                classGroupId: null,
-                status:       'active',
-                createdBy:    req.user.uid,
-                creatorRole:  'admin',
+                status: 'active',
+                createdBy: req.user.uid,
+                creatorRole: 'admin',
             });
         }
-
-        res.json({ message: `Booking đã được ${status === 'confirmed' ? 'xác nhận' : 'huỷ'}` });
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
+        res.json({ message: `Đã ${status === 'confirmed' ? 'xác nhận' : 'huỷ'} đơn hàng` });
+    } catch (err) { res.status(500).json({ error: err.message }); }
 };
 
 /**
@@ -188,74 +173,30 @@ const updateBookingStatus = async (req, res) => {
 const createBooking = async (req, res) => {
     const { customerId, membershipId, ptServiceId, ptId, totalPrice } = req.body;
 
-    if (!customerId || !membershipId || !ptServiceId || totalPrice == null) {
-        return res.status(400).json({
-            error: 'Thiếu thông tin bắt buộc: customerId, membershipId, ptServiceId, totalPrice'
-        });
-    }
-    if (ptServiceId !== 'pt-none' && !ptId) {
-        return res.status(400).json({ error: 'ptId là bắt buộc khi chọn dịch vụ PT' });
-    }
-    if (typeof totalPrice !== 'number' || totalPrice < 0) {
-        return res.status(400).json({ error: 'totalPrice phải là số không âm' });
-    }
-
     try {
-        const [userDoc, memDoc] = await Promise.all([
-            db.collection('users').doc(customerId).get(),
-            db.collection('memberships').doc(membershipId).get(),
-        ]);
+        const ptServDoc = await db.collection('pt_services').doc(ptServiceId).get();
+        if (!ptServDoc.exists) return res.status(404).json({ error: 'Dịch vụ PT không tồn tại' });
 
-        if (!userDoc.exists) return res.status(404).json({ error: 'Không tìm thấy khách hàng' });
-        if (!memDoc.exists)  return res.status(404).json({ error: 'Không tìm thấy gói tập' });
+        const ptServiceData = ptServDoc.data();
 
-        let ptDoc = null;
-        if (ptId) {
-            ptDoc = await db.collection('pts').doc(ptId).get();
-            if (!ptDoc.exists) return res.status(404).json({ error: 'Không tìm thấy PT' });
+        // Kiểm tra logic theo type
+        if (ptServiceData.type !== 'none' && !ptId) {
+            return res.status(400).json({ error: `Dịch vụ ${ptServiceData.name} yêu cầu phải chọn PT` });
         }
 
         const newBooking = {
             customerId,
             membershipId,
             ptServiceId,
-            ptId:       ptId || '',
+            ptId: ptId || '',
             totalPrice,
-            status:     'pending',
-            createdAt:  new Date(),
+            status: 'pending',
+            createdAt: new Date(),
         };
 
         const docRef = await db.collection('bookings').add(newBooking);
-
-        // Join để trả về
-        const userData      = userDoc.data();
-        const customerName  = userData.displayName || 'Người dùng';
-        const customerPhone = userData.phone || '';
-        const membershipName = memDoc.data().name;
-
-        let ptServiceName = 'Không thuê PT';
-        if (ptServiceId !== 'pt-none') {
-            const ptServDoc = await db.collection('pt_services').doc(ptServiceId).get();
-            ptServiceName = ptServDoc.exists ? ptServDoc.data().name : ptServiceId;
-        }
-
-        const ptName = ptDoc ? (ptDoc.data().fullName || '') : 'Chưa chọn / Không có';
-
-        res.status(201).json({
-            message: 'Tạo booking thành công',
-            booking: {
-                id: docRef.id,
-                ...convertTimestamps(newBooking),
-                customerName,
-                customerPhone,
-                membershipName,
-                ptServiceName,
-                ptName,
-            },
-        });
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
+        res.status(201).json({ message: 'Tạo booking thành công', id: docRef.id });
+    } catch (err) { res.status(500).json({ error: err.message }); }
 };
 
 module.exports = { getBookings, getBookingById, updateBookingStatus, createBooking };
