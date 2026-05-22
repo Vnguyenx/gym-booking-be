@@ -3,10 +3,6 @@ const { db } = require('../config/firebase');
 
 // ─── GET /api/customer/bookings ───────────────────────────────────────────────
 
-/**
- * Lấy lịch sử lịch hẹn / buổi học của customer.
- * Sắp xếp mới nhất lên đầu (orderBy createdAt desc).
- */
 const getMyBookings = async (req, res) => {
     try {
         const uid = req.user.uid;

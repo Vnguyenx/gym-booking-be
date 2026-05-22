@@ -75,6 +75,11 @@ router.post  ('/zones',                contentCtrl.createZone);
 router.patch ('/zones/:zoneId',        contentCtrl.updateZone);
 router.delete('/zones/:zoneId',        contentCtrl.deleteZone);
 
+router.get   ('/floors',               contentCtrl.getFloors);
+router.post  ('/floors',               contentCtrl.createFloor);
+router.patch ('/floors/:floorId',      contentCtrl.updateFloor);
+router.delete('/floors/:floorId',      contentCtrl.deleteFloor);
+
 // ══════════════════════════════════════════════════════
 //  CATALOG (gói tập, dịch vụ PT, thiết bị)
 // ══════════════════════════════════════════════════════

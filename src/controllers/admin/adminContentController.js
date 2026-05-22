@@ -5,6 +5,64 @@
 
 const { admin, auth, db } = require('../../config/firebase');
 
+
+// ══════════════════════════════════════════════════════
+//  FLOORS — collection: floors
+// ══════════════════════════════════════════════════════
+
+/** GET /api/admin/floors */
+const getFloors = async (req, res) => {
+    try {
+        const snap = await db.collection('floors').orderBy('floorNumber').get();
+        const floors = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        res.json({ floors });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+};
+
+/** POST /api/admin/floors */
+const createFloor = async (req, res) => {
+    const { name, floorNumber, description, gymId, area, img } = req.body;
+    if (!name || floorNumber === undefined || !gymId) {
+        return res.status(400).json({ error: 'Thiếu trường bắt buộc: name, floorNumber, gymId' });
+    }
+    try {
+        const ref = await db.collection('floors').add({
+            name,
+            floorNumber,
+            description: description ?? '',
+            gymId,
+            area: area ?? 0,
+            img: img ?? '',
+        });
+        res.status(201).json({ message: 'Tạo tầng thành công', floorId: ref.id });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+};
+
+/** PATCH /api/admin/floors/:floorId */
+const updateFloor = async (req, res) => {
+    try {
+        await db.collection('floors').doc(req.params.floorId).update(req.body);
+        res.json({ message: 'Cập nhật tầng thành công' });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+};
+
+/** DELETE /api/admin/floors/:floorId */
+const deleteFloor = async (req, res) => {
+    try {
+        await db.collection('floors').doc(req.params.floorId).delete();
+        res.json({ message: 'Đã xoá tầng' });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+};
+
+
 // ══════════════════════════════════════════════════════
 //  GYM INFO — document: gym_info/main-gym
 // ══════════════════════════════════════════════════════
@@ -184,6 +242,7 @@ const deleteZone = async (req, res) => {
 };
 
 module.exports = {
+    getFloors, createFloor, updateFloor, deleteFloor,
     getGymInfo, updateGymInfo,
     getGymSetting, updateGymSetting,
     getBanners, createBanner, updateBanner, deleteBanner,
