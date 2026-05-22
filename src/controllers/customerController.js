@@ -3,22 +3,33 @@ const { db } = require('../config/firebase');
 
 // ─── GET /api/customer/bookings ───────────────────────────────────────────────
 
+// src/controllers/customerController.js
+// Chỉ sửa các hàm getMyBookings và getMyClasses
+
 const getMyBookings = async (req, res) => {
     try {
         const uid = req.user.uid;
-
         const snap = await db
             .collection('bookings')
             .where('customerId', '==', uid)
             .orderBy('createdAt', 'desc')
             .get();
 
+        // Lấy danh sách memberships và pt_services một lần để map
+        const membershipsSnap = await db.collection('memberships').get();
+        const membershipMap = {};
+        membershipsSnap.forEach(doc => { membershipMap[doc.id] = doc.data().name; });
+
+        const ptServicesSnap = await db.collection('pt_services').get();
+        const ptServiceMap = {};
+        ptServicesSnap.forEach(doc => { ptServiceMap[doc.id] = doc.data().name; });
+
         const bookings = snap.docs.map((doc) => {
             const data = doc.data();
             const parseDate = (d) => {
                 if (!d) return null;
-                if (d.toDate) return d.toDate().toISOString(); // Firestore Timestamp
-                return d; // đã là string rồi, trả về luôn
+                if (d.toDate) return d.toDate().toISOString();
+                return d;
             };
 
             return {
@@ -26,6 +37,9 @@ const getMyBookings = async (req, res) => {
                 ...data,
                 createdAt: parseDate(data.createdAt),
                 paidAt:    parseDate(data.paidAt),
+                // Thêm tên
+                membershipName: membershipMap[data.membershipId] || data.membershipId,
+                ptServiceName:  ptServiceMap[data.ptServiceId] || data.ptServiceId,
             };
         });
 
@@ -34,20 +48,21 @@ const getMyBookings = async (req, res) => {
         res.status(500).json({ error: err.message });
     }
 };
-/**
- * Lấy danh sách lớp học + điểm danh của customer.
- * Mỗi classItem có mảng attendance lồng bên trong.
- */
+
 const getMyClasses = async (req, res) => {
     try {
         const uid = req.user.uid;
 
-        // Kéo ra ngoài — dùng chung cho cả class lẫn attendance
         const processDate = (d) => {
             if (!d) return null;
             if (d.toDate) return d.toDate().toISOString();
             return d;
         };
+
+        // Lấy map pt_service để có tên hiển thị cho class.type
+        const ptServicesSnap = await db.collection('pt_services').get();
+        const ptServiceMap = {};
+        ptServicesSnap.forEach(doc => { ptServiceMap[doc.id] = doc.data().name; });
 
         const classesSnap = await db
             .collection('classes')
@@ -58,7 +73,6 @@ const getMyClasses = async (req, res) => {
         const classes = await Promise.all(
             classesSnap.docs.map(async (doc) => {
                 const data = doc.data();
-
                 const attendanceSnap = await doc.ref
                     .collection('attendance')
                     .orderBy('date', 'desc')
@@ -77,12 +91,16 @@ const getMyClasses = async (req, res) => {
                     };
                 });
 
+                // Lấy tên dịch vụ PT từ map
+                const typeName = ptServiceMap[data.type] || data.type;
+
                 return {
                     id:        doc.id,
                     ...data,
                     startDate: processDate(data.startDate),
                     endDate:   processDate(data.endDate),
                     attendance,
+                    typeName,  // Thêm trường này
                 };
             })
         );
