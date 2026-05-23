@@ -103,6 +103,9 @@ router.delete('/equipment/:id',        catalogCtrl.deleteEquipment);
 // ══════════════════════════════════════════════════════
 router.get   ('/revenue/summary',      revenueCtrl.getRevenueSummary);
 router.get   ('/revenue',              revenueCtrl.getRevenue);
+router.get   ('/revenue/year',         revenueCtrl.getRevenueByYear);
+router.get   ('/revenue/week',         revenueCtrl.getRevenueByWeek);
+router.get   ('/revenue/range',        revenueCtrl.getRevenueByRange);
 
 
 module.exports = router;
