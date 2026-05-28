@@ -16,8 +16,11 @@ const app = express();
 
 // Cho phép FE gọi API sang BE kèm cookie
 app.use(cors({
-    origin: process.env.CLIENT_URL || 'http://localhost:3000',
-    credentials: true, // bắt buộc để cookie hoạt động
+    origin: [
+        'http://localhost:3000',
+        'https://Vnguyenx.github.io',
+    ],
+    credentials: true,
 }));
 
 // Cho phép đọc JSON từ request body
