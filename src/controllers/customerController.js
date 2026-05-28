@@ -1,10 +1,7 @@
 // src/controllers/customerController.js
-const { db } = require('../config/firebase');
+const { admin, db } = require('../config/firebase');
 
 // ─── GET /api/customer/bookings ───────────────────────────────────────────────
-
-// src/controllers/customerController.js
-// Chỉ sửa các hàm getMyBookings và getMyClasses
 
 const getMyBookings = async (req, res) => {
     try {
@@ -37,9 +34,8 @@ const getMyBookings = async (req, res) => {
                 ...data,
                 createdAt: parseDate(data.createdAt),
                 paidAt:    parseDate(data.paidAt),
-                // Thêm tên
                 membershipName: membershipMap[data.membershipId] || data.membershipId,
-                ptServiceName:  ptServiceMap[data.ptServiceId] || data.ptServiceId,
+                ptServiceName:  ptServiceMap[data.ptServiceId]  || data.ptServiceId,
             };
         });
 
@@ -48,6 +44,8 @@ const getMyBookings = async (req, res) => {
         res.status(500).json({ error: err.message });
     }
 };
+
+// ─── GET /api/customer/classes ────────────────────────────────────────────────
 
 const getMyClasses = async (req, res) => {
     try {
@@ -91,7 +89,6 @@ const getMyClasses = async (req, res) => {
                     };
                 });
 
-                // Lấy tên dịch vụ PT từ map
                 const typeName = ptServiceMap[data.type] || data.type;
 
                 return {
@@ -100,7 +97,7 @@ const getMyClasses = async (req, res) => {
                     startDate: processDate(data.startDate),
                     endDate:   processDate(data.endDate),
                     attendance,
-                    typeName,  // Thêm trường này
+                    typeName,
                 };
             })
         );
@@ -110,6 +107,7 @@ const getMyClasses = async (req, res) => {
         res.status(500).json({ error: err.message });
     }
 };
+
 // ─── PUT /api/customer/profile ────────────────────────────────────────────────
 
 /**
@@ -121,7 +119,6 @@ const updateProfile = async (req, res) => {
         const uid = req.user.uid;
         const { displayName, phone, avatarUrl } = req.body;
 
-        // Chỉ cập nhật các field được phép, bỏ qua email và role
         const updateData = {};
         if (displayName !== undefined) updateData.displayName = displayName;
         if (phone       !== undefined) updateData.phone       = phone;
@@ -129,16 +126,15 @@ const updateProfile = async (req, res) => {
 
         await db.collection('users').doc(uid).update(updateData);
 
-        // Trả về data mới để FE cập nhật store luôn
         const updatedDoc = await db.collection('users').doc(uid).get();
-
         res.json({ user: updatedDoc.data() });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
 };
 
-// PATCH /api/customer/bookings/:id/cancel
+// ─── PATCH /api/customer/bookings/:id/cancel ──────────────────────────────────
+
 const cancelBooking = async (req, res) => {
     try {
         const uid = req.user.uid;
@@ -152,12 +148,12 @@ const cancelBooking = async (req, res) => {
 
         const booking = bookingDoc.data();
 
-        // Chỉ cho huỷ booking của chính mình
         if (booking.customerId !== uid)
             return res.status(403).json({ error: 'Không có quyền huỷ đăng ký này' });
 
-        // Chỉ cho huỷ khi đang pending
-        if (booking.status !== 'pending')
+        // Cho huỷ cả pending (VNPay) lẫn pending_manual (QR)
+        const cancellableStatuses = ['pending', 'pending_manual'];
+        if (!cancellableStatuses.includes(booking.status))
             return res.status(400).json({ error: 'Chỉ có thể huỷ đăng ký đang chờ xác nhận' });
 
         await bookingRef.update({ status: 'cancelled' });
@@ -168,7 +164,8 @@ const cancelBooking = async (req, res) => {
     }
 };
 
-// GET /api/pts
+// ─── GET /api/customer/pts ────────────────────────────────────────────────────
+
 const getPTs = async (req, res) => {
     try {
         const snap = await db.collection('pts').get();
@@ -179,9 +176,14 @@ const getPTs = async (req, res) => {
     }
 };
 
+// ─── POST /api/customer/checkin ───────────────────────────────────────────────
+
 /**
- * POST /api/customer/checkin
- * Customer nhập mã bí mật để điểm danh
+ * Customer nhập mã bí mật để điểm danh buổi tập hôm nay.
+ * Fixes:
+ *   - Dùng admin.firestore.FieldValue.increment thay vì gọi admin trực tiếp
+ *   - Dùng Timestamp để query "hôm nay" thay vì ISO string
+ *   - Lưu date bằng Timestamp.now() để nhất quán với query
  */
 const checkin = async (req, res) => {
     try {
@@ -203,41 +205,51 @@ const checkin = async (req, res) => {
         }
 
         const classData = classDoc.data();
-        if (classData.status !== 'active') return res.status(400).json({ error: 'Gói tập đã hết hạn hoặc bị khóa' });
-        if (classData.usedSessions >= classData.totalSessions) return res.status(400).json({ error: 'Bạn đã dùng hết số buổi tập' });
 
-        // 3. Kiểm tra xem hôm nay đã điểm danh chưa (tránh trùng)
+        if (classData.status !== 'active')
+            return res.status(400).json({ error: 'Gói tập đã hết hạn hoặc bị khóa' });
+
+        if (classData.usedSessions >= classData.totalSessions)
+            return res.status(400).json({ error: 'Bạn đã dùng hết số buổi tập' });
+
+        // 3. Kiểm tra xem hôm nay đã điểm danh chưa — dùng Timestamp để query đúng
         const today = new Date();
         today.setHours(0, 0, 0, 0);
+        const todayTimestamp = admin.firestore.Timestamp.fromDate(today);
 
         const existingAtt = await classRef.collection('attendance')
-            .where('date', '>=', today.toISOString())
+            .where('date', '>=', todayTimestamp)
             .where('isSuccess', '==', true)
             .get();
 
-        if (!existingAtt.empty) return res.status(400).json({ error: 'Bạn đã điểm danh thành công hôm nay rồi' });
+        if (!existingAtt.empty)
+            return res.status(400).json({ error: 'Bạn đã điểm danh thành công hôm nay rồi' });
 
-        // 4. Tạo record điểm danh dựa trên loại gói
+        // 4. Tạo record điểm danh
         const isPT = classData.type === 'pt_coaching';
         const attendanceRecord = {
-            date: new Date().toISOString(),
-            isSuccess: true,
-            type: isPT ? "pt_session" : "membership_checkin",
-            customerStatus: "confirmed",
-            ptStatus: isPT ? "none" : null, // PT sẽ confirm sau nếu là gói PT
-            secretCodeUsed: secretCode
+            date:           admin.firestore.Timestamp.now(), // Timestamp để query nhất quán
+            isSuccess:      true,
+            type:           isPT ? 'pt_session' : 'membership_checkin',
+            customerStatus: 'confirmed',
+            ptStatus:       isPT ? 'none' : null,
+            secretCodeUsed: secretCode,
         };
 
         const newAtt = await classRef.collection('attendance').add(attendanceRecord);
 
-        // 5. Cập nhật số buổi đã dùng
+        // 5. Tăng số buổi đã dùng
         await classRef.update({
-            usedSessions: admin.firestore.FieldValue.increment(1)
+            usedSessions: admin.firestore.FieldValue.increment(1),
         });
 
         res.json({
             message: 'Điểm danh thành công',
-            record: { id: newAtt.id, ...attendanceRecord }
+            record: {
+                id: newAtt.id,
+                ...attendanceRecord,
+                date: attendanceRecord.date.toDate().toISOString(), // trả về ISO string cho FE
+            },
         });
 
     } catch (err) {

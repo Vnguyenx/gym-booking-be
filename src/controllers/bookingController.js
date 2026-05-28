@@ -11,28 +11,36 @@ const bookingService = require('../services/bookingService');
 const vnpayIPN = async (req, res) => {
     try {
         let vnp_Params = req.query;
-        // Chỉ gọi Service xử lý dữ liệu từ query
         const result = await bookingService.processVnpayIPN(vnp_Params);
-
-        // Trả về mã lỗi theo yêu cầu của VNPay
         res.status(200).json({ RspCode: result.code, Message: result.message });
     } catch (err) {
-// Xem thử nó bị vướng ở đoạn if nào khiến nó nhảy vào mã 99
         console.error('IPN Controller Error:', err);
         res.status(200).json({ RspCode: '99', Message: 'Unknown Error' });
     }
 };
 
-// POST /api/bookings — Tạo booking mới
+// POST /api/bookings — Tạo booking mới (VNPay)
 const createBooking = async (req, res) => {
     try {
-        // Truyền thêm 'req' vào hàm service
         const result = await bookingService.createBooking(req, req.user.uid, req.body);
-
-        // Trả kết quả (trong đó có paymentUrl) về cho Frontend
         res.status(201).json(result);
     } catch (err) {
         console.error('Lỗi tạo booking:', err);
+        res.status(500).json({ error: err.message });
+    }
+};
+
+/**
+ * POST /api/bookings/qr — Tạo booking thanh toán QR
+ * Trả về qrUrl, paymentCode để FE hiển thị modal.
+ * Booking được lưu với status 'pending_manual', admin xác nhận thủ công.
+ */
+const createBookingQR = async (req, res) => {
+    try {
+        const result = await bookingService.createBookingQR(req.user.uid, req.body);
+        res.status(201).json(result);
+    } catch (err) {
+        console.error('Lỗi tạo booking QR:', err);
         res.status(500).json({ error: err.message });
     }
 };
@@ -59,4 +67,4 @@ const getPTServices = async (req, res) => {
     }
 };
 
-module.exports = { createBooking, getAvailablePTs, getPTServices, vnpayIPN };
+module.exports = { createBooking, createBookingQR, getAvailablePTs, getPTServices, vnpayIPN };

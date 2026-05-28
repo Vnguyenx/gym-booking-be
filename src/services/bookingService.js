@@ -3,7 +3,7 @@
 // Controller chỉ gọi vào đây, không chứa logic
 
 const { admin, db } = require('../config/firebase');
-//const { generateQR } = require('../utils/vietqr');
+const { generateQR } = require('../utils/vietqr');
 const crypto = require('crypto');
 const qs = require('qs');
 const { generateVnpayUrl, sortObject } = require('../utils/vnpay');
@@ -55,18 +55,15 @@ const calcTotalPrice = async (membershipId, ptServiceId) => {
 };
 
 /**
- * Tạo booking mới
+ * Tạo booking mới — thanh toán qua VNPay
  * @param {string} customerId - uid của khách hàng (lấy từ session)
  * @param {object} body - { membershipId, ptServiceId, ptId }
  */
 const createBooking = async (req, customerId, body) => {
     const { membershipId, ptServiceId, ptId } = body;
 
-    // Logic tính tiền (giữ nguyên của bạn)
     const priceData = await calcTotalPrice(membershipId, ptServiceId);
 
-    // Bước 1: Lưu booking vào Firestore với trạng thái 'pending'
-    // Lưu ý: Chúng ta lưu trước để có ID của Booking
     const bookingRef = await db.collection('bookings').add({
         customerId,
         membershipId,
@@ -74,18 +71,71 @@ const createBooking = async (req, customerId, body) => {
         ptId: ptId || '',
         totalPrice: priceData.totalPrice,
         status: 'pending',
+        paymentMethod: 'vnpay',
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
     });
 
-    // Bước 2: Gọi hàm tạo Link VNPay từ file utils/vnpay.js đã làm ở Bước 2
-    // Chúng ta truyền: req (để lấy IP), totalPrice (số tiền), bookingRef.id (mã đơn)
     const paymentUrl = generateVnpayUrl(req, priceData.totalPrice, bookingRef.id);
 
-    // Bước 3: Trả về kết quả cho Controller
     return {
         bookingId: bookingRef.id,
-        paymentUrl, // Đây là cái link FE sẽ dùng để chuyển hướng
-        totalPrice: priceData.totalPrice
+        paymentUrl,
+        totalPrice: priceData.totalPrice,
+    };
+};
+
+/**
+ * Tạo booking mới — thanh toán qua QR chuyển khoản (VietQR)
+ * Không redirect sang cổng thanh toán, trả về QR URL để FE hiển thị modal.
+ * Admin xác nhận thủ công sau khi kiểm tra tài khoản.
+ *
+ * @param {string} customerId - uid của khách hàng (lấy từ session)
+ * @param {object} body - { membershipId, ptServiceId, ptId }
+ * @returns {{ bookingId, qrUrl, paymentCode, totalPrice }}
+ */
+const createBookingQR = async (customerId, body) => {
+    const { membershipId, ptServiceId, ptId } = body;
+
+    // 1. Tính tiền từ DB (giống VNPay — không tin giá FE)
+    const priceData = await calcTotalPrice(membershipId, ptServiceId);
+
+    // 2. Lấy thông tin tài khoản ngân hàng từ gym_settings
+    const paymentConfig = await getPaymentConfig();
+    const { bankId, accountNo, accountName } = paymentConfig;
+
+    // 3. Sinh mã đối chiếu duy nhất
+    const paymentCode = generatePaymentCode();
+
+    // 4. Lưu booking với status 'pending_manual' — chờ admin xác nhận
+    const bookingRef = await db.collection('bookings').add({
+        customerId,
+        membershipId,
+        ptServiceId,
+        ptId: ptId || '',
+        totalPrice: priceData.totalPrice,
+        status: 'pending_manual',   // khác với VNPay ('pending')
+        paymentMethod: 'qr',
+        paymentCode,                // mã đối chiếu để admin kiểm tra
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    // 5. Tạo URL ảnh QR từ VietQR
+    const qrUrl = generateQR({
+        bankId,
+        accountNo,
+        accountName,
+        amount: priceData.totalPrice,
+        paymentCode,
+    });
+
+    return {
+        bookingId: bookingRef.id,
+        qrUrl,
+        paymentCode,
+        totalPrice: priceData.totalPrice,
+        accountNo,
+        accountName,
+        bankId,
     };
 };
 
@@ -113,7 +163,6 @@ const getPTServices = async () => {
 const processVnpayIPN = async (vnp_Params) => {
     const secureHash = vnp_Params['vnp_SecureHash'];
 
-    // 1. Chuẩn bị dữ liệu để kiểm tra chữ ký
     delete vnp_Params['vnp_SecureHash'];
     delete vnp_Params['vnp_SecureHashType'];
     const sortedParams = sortObject(vnp_Params);
@@ -123,7 +172,6 @@ const processVnpayIPN = async (vnp_Params) => {
     const hmac = crypto.createHmac("sha512", secretKey);
     const signed = hmac.update(Buffer.from(signData, 'utf-8')).digest("hex");
 
-    // 2. Kiểm tra tính toàn vẹn (Checksum)
     if (secureHash !== signed) {
         return { success: false, code: '97', message: 'Invalid Checksum' };
     }
@@ -131,29 +179,23 @@ const processVnpayIPN = async (vnp_Params) => {
     const bookingId = vnp_Params['vnp_TxnRef'];
     const responseCode = vnp_Params['vnp_ResponseCode'];
 
-    // 3. Thực hiện nghiệp vụ cập nhật Database
     if (responseCode === '00') {
-        // 1. Lấy thông tin booking
         const bookingDoc = await db.collection('bookings').doc(bookingId).get();
         if (!bookingDoc.exists) return { success: false, code: '01', message: 'Booking not found' };
         const booking = bookingDoc.data();
 
-        // 2. Lấy thông tin membership để tính thời hạn
         const membershipDoc = await db.collection('memberships').doc(booking.membershipId).get();
         const membership = membershipDoc.data();
         const durationMonths = membership.durationMonths;
 
-        // 3. Tính startDate, endDate, totalSessions
         const startDate = new Date();
         const endDate = new Date();
         endDate.setMonth(endDate.getMonth() + durationMonths);
 
-        // Ước tính tổng số buổi: 4 buổi/tuần * 4 tuần * số tháng
         const totalSessions = durationMonths * 16;
 
-        // 4. Tạo class mới
         await db.collection('classes').add({
-            type: booking.ptServiceId,           // ví dụ: "pt-1on1"
+            type: booking.ptServiceId,
             classGroupId: '',
             status: 'active',
             startDate: admin.firestore.Timestamp.fromDate(startDate),
@@ -164,14 +206,13 @@ const processVnpayIPN = async (vnp_Params) => {
             ptId: booking.ptId || '',
             createdBy: 'system',
             creatorRole: 'system',
-            bookingId,                           // liên kết ngược lại booking
+            bookingId,
         });
 
-        // 5. Update booking status
         await db.collection('bookings').doc(bookingId).update({
             status: 'confirmed',
             paidAt: admin.firestore.FieldValue.serverTimestamp(),
-            vnpay_TransactionNo: vnp_Params['vnp_TransactionNo']
+            vnpay_TransactionNo: vnp_Params['vnp_TransactionNo'],
         });
 
         return { success: true, code: '00', message: 'Confirm Success' };
@@ -180,7 +221,7 @@ const processVnpayIPN = async (vnp_Params) => {
             status: 'cancelled',
             cancelReason: 'VNPay payment failed',
             vnpay_ResponseCode: responseCode,
-            vnpay_TransactionNo: vnp_Params['vnp_TransactionNo'] || ''
+            vnpay_TransactionNo: vnp_Params['vnp_TransactionNo'] || '',
         });
         return { success: false, code: '01', message: 'Payment Failed' };
     }
@@ -188,6 +229,7 @@ const processVnpayIPN = async (vnp_Params) => {
 
 module.exports = {
     createBooking,
+    createBookingQR,
     getAvailablePTs,
     getPTServices,
     processVnpayIPN,

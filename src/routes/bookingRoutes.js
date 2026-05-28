@@ -6,6 +6,7 @@ const router = express.Router();
 
 const {
     createBooking,
+    createBookingQR,
     getAvailablePTs,
     getPTServices,
     vnpayIPN,
@@ -18,12 +19,15 @@ router.get('/available-pts', verifySession, getAvailablePTs);
 // Lấy danh sách gói dịch vụ PT
 router.get('/pt-services', verifySession, getPTServices);
 
-// Tạo booking mới
+// Tạo booking mới — thanh toán VNPay
 router.post('/', verifySession, createBooking);
 
+// Tạo booking mới — thanh toán QR chuyển khoản
+// Trả về { bookingId, qrUrl, paymentCode, totalPrice, accountNo, accountName, bankId }
+router.post('/qr', verifySession, createBookingQR);
 
 /**
- * 2. Route nhận thông báo kết quả từ VNPay (IPN)
+ * Route nhận thông báo kết quả từ VNPay (IPN)
  * QUAN TRỌNG: Không dùng verifySession ở đây
  * VNPay gọi bằng phương thức GET
  */
