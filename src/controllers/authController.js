@@ -40,7 +40,7 @@ const login = async (req, res) => {
         res.cookie('session', sessionCookie, {
             httpOnly: true,
             secure: process.env.NODE_ENV === 'production',
-            sameSite: 'strict',
+            sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'strict',
             maxAge: expiresIn,
         });
 
@@ -52,7 +52,11 @@ const login = async (req, res) => {
 
 // POST /api/auth/logout
 const logout = (req, res) => {
-    res.clearCookie('session');
+    res.clearCookie('session', {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'strict',
+    });
     res.json({ message: 'Đã đăng xuất' });
 };
 
