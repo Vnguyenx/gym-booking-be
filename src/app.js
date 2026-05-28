@@ -18,7 +18,7 @@ const app = express();
 app.use(cors({
     origin: [
         'http://localhost:3000',
-        'https://Vnguyenx.github.io',
+        'https://vnguyenx.github.io',
     ],
     credentials: true,
 }));
