@@ -36,7 +36,7 @@ const generateVnpayUrl = (req, amount, bookingId) => {
     const tmnCode = process.env.VNP_TMNCODE;
     const secretKey = process.env.VNP_HASHSECRET;
     let vnpUrl = process.env.VNP_URL;
-    const returnUrl = process.env.VNP_RETURNURL;
+    const returnUrl = process.env.VNP_RETURNURL || "https://vnguyenx.github.io/booking_success";
 
     // Lấy IP của người dùng (VNPay dùng để phòng chống gian lận)
     const ipAddr = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
