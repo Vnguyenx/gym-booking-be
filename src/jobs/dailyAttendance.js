@@ -8,51 +8,58 @@ const startDailyAttendanceJob = () => {
         try {
             const today = new Date();
             today.setHours(0, 0, 0, 0);
-            const todayStr = today.toISOString().split('T')[0];
+            const todayStart = today.toISOString();
 
-            // 1. Lấy tất cả lớp học đang Active
+            // 1. Lấy tất cả lớp đang active
             const activeClasses = await db.collection('classes')
                 .where('status', '==', 'active')
                 .get();
 
+            if (activeClasses.empty) {
+                console.log('No active classes found.');
+                return;
+            }
+
             const batch = db.batch();
+            let recordsCreated = 0;
 
-            for (const doc of activeClasses.docs) {
-                const classRef = doc.ref;
+            for (const classDoc of activeClasses.docs) {
+                const classRef = classDoc.ref;
+                const classData = classDoc.data();
 
-                // Quét tất cả attendance của TẤT CẢ các lớp cùng lúc
-                const allAttendanceToday = await db.collectionGroup('attendance')
-                    .where('date', '>=', today.toISOString())
+                // 2. Kiểm tra sub-collection attendance của RIÊNG lớp này hôm nay
+                const todayAttendance = await classRef.collection('attendance')
+                    .where('date', '>=', todayStart)
                     .get();
 
-                if (allAttendanceToday.empty) {
-                    // Nếu chưa có bất kỳ record nào -> Tạo record vắng (isSuccess: null)
+                // 3. Nếu chưa có record nào hôm nay → tạo record vắng + tăng usedSessions
+                if (todayAttendance.empty) {
+                    // Tạo attendance record đánh dấu vắng
                     const newAttRef = classRef.collection('attendance').doc();
                     batch.set(newAttRef, {
                         date: new Date().toISOString(),
-                        isSuccess: null, // Đánh dấu vắng/chưa điểm danh
+                        isSuccess: null,       // null = vắng/chưa điểm danh
                         type: null,
                         customerStatus: null,
                         ptStatus: null,
                         secretCodeUsed: null
                     });
+
+                    // Tăng usedSessions lên 1
+                    const currentUsed = classData.usedSessions ?? 0;
+                    batch.update(classRef, {
+                        usedSessions: currentUsed + 1
+                    });
+
+                    recordsCreated++;
                 }
             }
+
             await batch.commit();
-            console.log('--- Daily Job Completed Successfully ---');
+            console.log(`--- Daily Job Completed: ${recordsCreated} absent records created ---`);
         } catch (error) {
             console.error('Daily Job Error:', error);
         }
-    });
-
-    // Bonus: Job tạo Secret Code mới vào 00:00 hàng ngày
-    cron.schedule('0 0 * * *', async () => {
-        const newCode = Math.random().toString(36).substring(2, 8).toUpperCase();
-        await db.collection('gym_settings').doc('daily_config').set({
-            currentSecretCode: newCode,
-            lastUpdated: new Date().toISOString()
-        });
-        console.log('Generated new secret code for today:', newCode);
     });
 };
 

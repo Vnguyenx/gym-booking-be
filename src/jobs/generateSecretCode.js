@@ -7,7 +7,6 @@ const generateCodeLogic = async () => {
         currentSecretCode: newCode,
         lastUpdated: new Date().toISOString()
     });
-    console.log('✅ Generated new secret code:', newCode);
 };
 
 const startGenerateSecretCodeJob = async () => {
@@ -18,13 +17,13 @@ const startGenerateSecretCodeJob = async () => {
 
     // Nếu chưa có data hoặc ngày cập nhật cuối cùng không phải hôm nay
     if (!data || !data.lastUpdated.startsWith(today)) {
-        console.log('⚠️ Detect missing code for today. Generating now...');
+        // console.log('⚠️ Detect missing code for today. Generating now...');
         await generateCodeLogic();
     }
 
     // 2. LÊN LỊCH CHẠY ĐỊNH KỲ (Cron Job)
     cron.schedule('0 0 * * *', async () => {
-        console.log('--- Running Secret Code Generator (00:00) ---');
+        // console.log('--- Running Secret Code Generator (00:00) ---');
         await generateCodeLogic();
     });
 };
