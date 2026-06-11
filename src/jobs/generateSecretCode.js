@@ -1,6 +1,10 @@
 const cron = require('node-cron');
 const { db } = require('../config/firebase');
 
+const getVNTimeString = () => {
+    return new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' });
+};
+
 const generateCodeLogic = async () => {
     const newCode = Math.random().toString(36).substring(2, 8).toUpperCase();
     await db.collection('gym_settings').doc('daily_config').set(
@@ -10,7 +14,7 @@ const generateCodeLogic = async () => {
         },
         { merge: true }
     );
-    console.log(`✅ Secret code generated: ${newCode}`);
+    console.log(`[${getVNTimeString()}] ✅ Secret code generated: ${newCode}`);
 };
 
 const getTodayVN = () => {
@@ -31,11 +35,11 @@ const startGenerateSecretCodeJob = async () => {
             : null;
 
         if (!data || lastUpdatedDay !== today) {
-            console.log(`⚠️ No code for today (${today}), generating...`);
+            console.log(`[${getVNTimeString()}] ⚠️ No code for today (${today}), generating...`);
             await generateCodeLogic();
         }
     } catch (err) {
-        console.error('Startup check error:', err);
+        console.error(`[${getVNTimeString()}] Startup check error:`, err);
     }
 
     cron.schedule(
@@ -44,7 +48,7 @@ const startGenerateSecretCodeJob = async () => {
             try {
                 await generateCodeLogic();
             } catch (err) {
-                console.error('Cron job error:', err);
+                console.error(`[${getVNTimeString()}] Cron job error:`, err);
             }
         },
         {
