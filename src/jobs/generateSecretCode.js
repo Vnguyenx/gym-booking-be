@@ -3,29 +3,54 @@ const { db } = require('../config/firebase');
 
 const generateCodeLogic = async () => {
     const newCode = Math.random().toString(36).substring(2, 8).toUpperCase();
-    await db.collection('gym_settings').doc('daily_config').set({
-        currentSecretCode: newCode,
-        lastUpdated: new Date().toISOString()
-    });
+    await db.collection('gym_settings').doc('daily_config').set(
+        {
+            currentSecretCode: newCode,
+            lastUpdated: new Date().toISOString(),
+        },
+        { merge: true }
+    );
+    console.log(`✅ Secret code generated: ${newCode}`);
+};
+
+const getTodayVN = () => {
+    const now = new Date();
+    const vnTime = new Date(now.getTime() + 7 * 60 * 60 * 1000);
+    return vnTime.toISOString().split('T')[0];
 };
 
 const startGenerateSecretCodeJob = async () => {
-    // 1. KIỂM TRA NGAY KHI KHỞI ĐỘNG (Startup Check)
-    const doc = await db.collection('gym_settings').doc('daily_config').get();
-    const data = doc.data();
-    const today = new Date().toISOString().split('T')[0];
+    try {
+        const doc = await db.collection('gym_settings').doc('daily_config').get();
+        const data = doc.data();
+        const today = getTodayVN();
+        const lastUpdatedDay = data?.lastUpdated
+            ? new Date(new Date(data.lastUpdated).getTime() + 7 * 60 * 60 * 1000)
+                .toISOString()
+                .split('T')[0]
+            : null;
 
-    // Nếu chưa có data hoặc ngày cập nhật cuối cùng không phải hôm nay
-    if (!data || !data.lastUpdated.startsWith(today)) {
-        // console.log('⚠️ Detect missing code for today. Generating now...');
-        await generateCodeLogic();
+        if (!data || lastUpdatedDay !== today) {
+            console.log(`⚠️ No code for today (${today}), generating...`);
+            await generateCodeLogic();
+        }
+    } catch (err) {
+        console.error('Startup check error:', err);
     }
 
-    // 2. LÊN LỊCH CHẠY ĐỊNH KỲ (Cron Job)
-    cron.schedule('0 0 * * *', async () => {
-        // console.log('--- Running Secret Code Generator (00:00) ---');
-        await generateCodeLogic();
-    });
+    cron.schedule(
+        '0 17 * * *',
+        async () => {
+            try {
+                await generateCodeLogic();
+            } catch (err) {
+                console.error('Cron job error:', err);
+            }
+        },
+        {
+            timezone: 'Asia/Ho_Chi_Minh',
+        }
+    );
 };
 
 module.exports = { startGenerateSecretCodeJob };
