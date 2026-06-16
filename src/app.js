@@ -5,7 +5,6 @@
 const express = require('express');
 const cors = require('cors');
 const cookieParser = require('cookie-parser');
-const { startDailyAttendanceJob } = require('./jobs/dailyAttendance');
 const { startGenerateSecretCodeJob } = require('./jobs/generateSecretCode');
 
 require('dotenv').config();
@@ -53,7 +52,6 @@ app.use((req, res) => {
     });
 });
 
-startDailyAttendanceJob();
 startGenerateSecretCodeJob().catch(err =>
     console.error('Failed to start secret code job:', err)
 );
