@@ -43,7 +43,7 @@ const startGenerateSecretCodeJob = async () => {
     }
 
     cron.schedule(
-        '0 17 * * *',
+        '0 0 * * *',
         async () => {
             try {
                 await generateCodeLogic();
