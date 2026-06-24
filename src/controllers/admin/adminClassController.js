@@ -73,11 +73,9 @@ const getClasses = async (req, res) => {
 
             // 3. CHỐT CHẶN: ptServiceId (Lấy theo TYPE thay vì ID cứng)
             let ptServiceName = 'Dịch vụ mặc định';
-            if (isValidPath(data.type)) {
-                const ptServDoc = await db.collection('pt_services').doc(data.type).get();
-                if (ptServDoc.exists) {
-                    ptServiceName = ptServDoc.data().name;
-                }
+            if (isValidPath(data.ptServiceId)) {
+                const ptServDoc = await db.collection('pt_services').doc(data.ptServiceId).get();
+                if (ptServDoc.exists) ptServiceName = ptServDoc.data().name;
             }
 
             return {
@@ -147,9 +145,9 @@ const getClassById = async (req, res) => {
  * Body: { customerId, ptId, type, totalSessions, startDate, endDate, classGroupId? }
  */
 const createClass = async (req, res) => {
-    const { customerName, ptName, type, totalSessions, startDate, endDate, classGroupId } = req.body;
+    const { customerName, ptName, ptServiceId, totalSessions, startDate, endDate, classGroupId } = req.body;
 
-    if (!customerName || !type || !totalSessions || !startDate || !endDate) {
+    if (!customerName || !ptServiceId || !totalSessions || !startDate || !endDate) {
         return res.status(400).json({ error: 'Thiếu trường bắt buộc' });
     }
 
@@ -157,6 +155,9 @@ const createClass = async (req, res) => {
         const userSnap = await db.collection('users').where('displayName', '==', customerName).limit(1).get();
         if (userSnap.empty) return res.status(404).json({ error: 'Không tìm thấy khách hàng này' });
         const customerId = userSnap.docs[0].id;
+
+        const ptServDoc = await db.collection('pt_services').doc(ptServiceId).get();
+        if (!ptServDoc.exists) return res.status(404).json({ error: 'Dịch vụ PT không tồn tại' });
 
         let ptId = '';
         if (ptName) {
@@ -167,7 +168,8 @@ const createClass = async (req, res) => {
         const newClass = {
             customerId,
             ptId:         ptId ?? '',
-            type,
+            ptServiceId,
+            type: ptServDoc.data().type,
             totalSessions,
             usedSessions: 0,
             startDate:    new Date(startDate),

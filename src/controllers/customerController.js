@@ -89,7 +89,7 @@ const getMyClasses = async (req, res) => {
                     };
                 });
 
-                const typeName = ptServiceMap[data.type] || data.type;
+                const typeName = ptServiceMap[data.ptServiceId] || data.ptServiceId;
 
                 return {
                     id:        doc.id,
@@ -226,7 +226,8 @@ const checkin = async (req, res) => {
             return res.status(400).json({ error: 'Bạn đã điểm danh thành công hôm nay rồi' });
 
         // 4. Tạo record điểm danh
-        const isPT = classData.type === 'pt_coaching';
+        const isPT = classData.type === 'personal' || classData.type === 'group';
+
         const attendanceRecord = {
             date:           admin.firestore.Timestamp.now(), // Timestamp để query nhất quán
             isSuccess:      true,

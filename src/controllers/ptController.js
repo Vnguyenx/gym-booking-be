@@ -21,8 +21,6 @@ const getAttendanceForClass = async (classId) => {
         .collection('attendance')
         .orderBy('date', 'desc')
         .get();
-
-    return snap.docs.map((d) => ({ id: d.id, ...convertTimestamps(d.data()) }));
 };
 
 const fetchCustomerInfo = async (customerIds) => {

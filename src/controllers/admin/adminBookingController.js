@@ -152,6 +152,7 @@ const updateBookingStatus = async (req, res) => {
             await db.collection('classes').add({
                 customerId: data.customerId,
                 ptId: ptServiceData.type === 'none' ? '' : (data.ptId || ''),
+                ptServiceId: data.ptServiceId,   // ✅ thêm field này — id thật trong pt_services
                 type: ptServiceData.type, // Lấy trực tiếp type: 'pt-1on1', 'pt-group', 'none'
                 totalSessions: Math.round((endDate - startDate) / (1000 * 60 * 60 * 24)),
                 usedSessions: 0,
