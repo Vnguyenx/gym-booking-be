@@ -21,6 +21,11 @@ const getAttendanceForClass = async (classId) => {
         .collection('attendance')
         .orderBy('date', 'desc')
         .get();
+
+    return snap.docs.map((doc) => ({
+        id: doc.id,
+        ...convertTimestamps(doc.data()),
+    }));
 };
 
 const fetchCustomerInfo = async (customerIds) => {
@@ -59,7 +64,7 @@ const fetchCustomerInfo = async (customerIds) => {
 const getActiveStudents = async (req, res) => {
     try {
         const ptId = req.user.uid;
-       // console.log('[getActiveStudents] step1 - ptId:', ptId);
+        // console.log('[getActiveStudents] step1 - ptId:', ptId);
 
         const classesSnap = await db
             .collection('classes')
