@@ -1,7 +1,4 @@
 // src/controllers/adminBookingController.js
-//
-// Quản lý collection: bookings
-
 const { admin, auth, db } = require('../../config/firebase');
 
 const convertTimestamps = (obj) => {
@@ -49,7 +46,7 @@ const getBookings = async (req, res) => {
             if (data.ptServiceId) {
                 const ptServDoc = await db.collection('pt_services').doc(data.ptServiceId).get();
                 if (ptServDoc.exists) {
-                    ptServiceName = ptServDoc.data().name; // Lấy "Tên dịch vụ" từ DB chứ không map tay
+                    ptServiceName = ptServDoc.data().name;
                 }
             }
 
@@ -60,7 +57,7 @@ const getBookings = async (req, res) => {
                 customerPhone,
                 membershipName,
                 ptName,
-                ptServiceName
+                ptServiceName,
             };
         }));
 
@@ -109,7 +106,7 @@ const getBookingById = async (req, res) => {
                 membershipName,
                 ptServiceName,
                 ptName,
-            }
+            },
         });
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -119,10 +116,6 @@ const getBookingById = async (req, res) => {
 /**
  * PATCH /api/admin/bookings/:bookingId
  * Duyệt hoặc huỷ đơn.
- *
- * Khi confirmed:
- *   - ptServiceId !== 'pt-none' → tạo class type pt-1on1 / pt-group (có ptId)
- *   - ptServiceId === 'pt-none' → tạo class type 'membership' (ptId = '')
  */
 const updateBookingStatus = async (req, res) => {
     const { bookingId } = req.params;
@@ -134,10 +127,15 @@ const updateBookingStatus = async (req, res) => {
         if (!bookingDoc.exists) return res.status(404).json({ error: 'Không tìm thấy đơn' });
 
         const data = bookingDoc.data();
-        await bookingRef.update({ status, updatedAt: new Date() });
+
+        // Ghi paidAt khi confirm
+        await bookingRef.update({
+            status,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            ...(status === 'confirmed' && { paidAt: admin.firestore.FieldValue.serverTimestamp() }),
+        });
 
         if (status === 'confirmed') {
-            // Lấy thông tin dịch vụ để check type
             const ptServDoc = await db.collection('pt_services').doc(data.ptServiceId).get();
             const ptServiceData = ptServDoc.exists ? ptServDoc.data() : { type: 'none' };
 
@@ -148,28 +146,30 @@ const updateBookingStatus = async (req, res) => {
             const endDate = new Date();
             endDate.setMonth(endDate.getMonth() + durationMonths);
 
-            // Logic tạo class dựa trên ptServiceData.type
             await db.collection('classes').add({
-                customerId: data.customerId,
-                ptId: ptServiceData.type === 'none' ? '' : (data.ptId || ''),
-                ptServiceId: data.ptServiceId,   // ✅ thêm field này — id thật trong pt_services
-                type: ptServiceData.type, // Lấy trực tiếp type: 'pt-1on1', 'pt-group', 'none'
+                customerId:   data.customerId,
+                ptId:         ptServiceData.type === 'none' ? '' : (data.ptId || ''),
+                ptServiceId:  data.ptServiceId,
+                type:         ptServiceData.type,
                 totalSessions: Math.round((endDate - startDate) / (1000 * 60 * 60 * 24)),
                 usedSessions: 0,
                 startDate,
                 endDate,
-                status: 'active',
-                createdBy: req.user.uid,
-                creatorRole: 'admin',
+                status:       'active',
+                createdBy:    req.user.uid,
+                creatorRole:  'admin',
             });
         }
+
         res.json({ message: `Đã ${status === 'confirmed' ? 'xác nhận' : 'huỷ'} đơn hàng` });
-    } catch (err) { res.status(500).json({ error: err.message }); }
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
 };
 
 /**
  * POST /api/admin/bookings
- * Tạo mới booking cho trường hợp khách thanh toán trực tiếp (walk-in / cash).
+ * Tạo mới booking cho trường hợp khách thanh toán trực tiếp.
  */
 const createBooking = async (req, res) => {
     const { customerId, membershipId, ptServiceId, ptId, totalPrice } = req.body;
@@ -180,24 +180,24 @@ const createBooking = async (req, res) => {
 
         const ptServiceData = ptServDoc.data();
 
-        // Kiểm tra logic theo type
         if (ptServiceData.type !== 'none' && !ptId) {
             return res.status(400).json({ error: `Dịch vụ ${ptServiceData.name} yêu cầu phải chọn PT` });
         }
 
-        const newBooking = {
+        const docRef = await db.collection('bookings').add({
             customerId,
             membershipId,
             ptServiceId,
             ptId: ptId || '',
             totalPrice,
-            status: 'pending',
-            createdAt: new Date(),
-        };
+            status:    'pending',
+            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
 
-        const docRef = await db.collection('bookings').add(newBooking);
         res.status(201).json({ message: 'Tạo booking thành công', id: docRef.id });
-    } catch (err) { res.status(500).json({ error: err.message }); }
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
 };
 
 module.exports = { getBookings, getBookingById, updateBookingStatus, createBooking };

@@ -10,6 +10,22 @@ const convertTimestamps = (obj) => {
     return result;
 };
 
+// Helper: parse an toàn giá trị paidAt, hỗ trợ Firestore Timestamp, string ISO, hoặc Date
+const parsePaidAt = (paidAt) => {
+    if (!paidAt) return null;
+    // Firestore Timestamp có method .toDate()
+    if (typeof paidAt.toDate === 'function') {
+        return paidAt.toDate();
+    }
+    // Firestore Timestamp dạng plain object { seconds, nanoseconds } (VD: sau khi qua JSON)
+    if (typeof paidAt === 'object' && typeof paidAt.seconds === 'number') {
+        return new Date(paidAt.seconds * 1000 + Math.floor((paidAt.nanoseconds || 0) / 1e6));
+    }
+    // String hoặc Date thông thường
+    const d = new Date(paidAt);
+    return isNaN(d.getTime()) ? null : d;
+};
+
 // Helper để enrich booking với thông tin tên
 const enrichBooking = async (booking) => {
     let customerName = '', customerPhone = '';
@@ -57,21 +73,20 @@ const getRevenue = async (req, res) => {
 
         const snap = await db.collection('bookings')
             .where('status', '==', 'confirmed')
-            .orderBy('paidAt', 'desc')
             .get();
 
         const allConfirmed = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
 
         const inMonth = allConfirmed.filter(b => {
-            if (!b.paidAt) return false;
-            const d = new Date(b.paidAt);
+            const d = parsePaidAt(b.paidAt);
+            if (!d) return false;
             return d.getMonth() + 1 === month && d.getFullYear() === year;
         });
 
         const totalRevenue = inMonth.reduce((sum, b) => sum + (b.totalPrice ?? 0), 0);
         const byDay = {};
         for (const b of inMonth) {
-            const day = new Date(b.paidAt).getDate();
+            const day = parsePaidAt(b.paidAt).getDate();
             byDay[day] = (byDay[day] ?? 0) + b.totalPrice;
         }
 
@@ -110,8 +125,8 @@ const getRevenueSummary = async (req, res) => {
 
         for (const doc of snap.docs) {
             const data = doc.data();
-            if (!data.paidAt) continue;
-            const d   = new Date(data.paidAt);
+            const d = parsePaidAt(data.paidAt);
+            if (!d) continue;
             const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
             if (summary[key] !== undefined) {
                 summary[key] += data.totalPrice ?? 0;
@@ -138,8 +153,8 @@ const getRevenueByYear = async (req, res) => {
 
         for (const doc of snap.docs) {
             const data = doc.data();
-            if (!data.paidAt) continue;
-            const d = new Date(data.paidAt);
+            const d = parsePaidAt(data.paidAt);
+            if (!d) continue;
             if (d.getFullYear() === year) {
                 const month = d.getMonth() + 1;
                 monthlyRevenue[month] += data.totalPrice ?? 0;
@@ -186,8 +201,8 @@ const getRevenueByWeek = async (req, res) => {
 
         for (const doc of snap.docs) {
             const data = doc.data();
-            if (!data.paidAt) continue;
-            const paidDate = new Date(data.paidAt);
+            const paidDate = parsePaidAt(data.paidAt);
+            if (!paidDate) continue;
             if (paidDate >= startDate && paidDate <= endDate) {
                 const key = paidDate.toISOString().slice(0, 10);
                 dailyRevenue[key] = (dailyRevenue[key] || 0) + (data.totalPrice ?? 0);
@@ -216,8 +231,8 @@ const getRevenueByRange = async (req, res) => {
         const bookingsInRange = [];
         for (const doc of snap.docs) {
             const data = doc.data();
-            if (!data.paidAt) continue;
-            const paidDate = new Date(data.paidAt);
+            const paidDate = parsePaidAt(data.paidAt);
+            if (!paidDate) continue;
             if (paidDate >= start && paidDate <= end) {
                 bookingsInRange.push({ id: doc.id, ...data });
             }
